@@ -5,7 +5,7 @@ plugins {
 
 import org.gradle.internal.os.OperatingSystem
 
-project.ext.lwjglVersion = "3.2.2"
+project.ext.lwjglVersion = "3.2.1"
 
 switch (OperatingSystem.current()) {
 	case OperatingSystem.LINUX:
@@ -93,6 +93,9 @@ dependencies {
 	runtimeOnly "org.lwjgl:lwjgl-xxhash:$lwjglVersion:$lwjglNatives"
 	runtimeOnly "org.lwjgl:lwjgl-yoga:$lwjglVersion:$lwjglNatives"
 	runtimeOnly "org.lwjgl:lwjgl-zstd:$lwjglVersion:$lwjglNatives"
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings "net.fabricmc:yarn:${project.yarn_mappings}"
+	modCompile "net.fabricmc:fabric-loader:${project.loader_version}"
 }
 sourceCompatibility = JavaVersion.VERSION_1_8
 targetCompatibility = JavaVersion.VERSION_1_8
@@ -104,18 +107,15 @@ group = project.maven_group
 minecraft {
 }
 
-dependencies {
+//dependencies {
 	//to change the versions see the gradle.properties file
-	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-	mappings "net.fabricmc:yarn:${project.yarn_mappings}"
-	modCompile "net.fabricmc:fabric-loader:${project.loader_version}"
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
 	// modCompile "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
 
 	// PSA: Some older mods, compiled on Loom 0.2.1, might have outdated Maven POMs.
 	// You may need to force-disable transitiveness on them.
-}
+//}
 
 processResources {
 	inputs.property "version", project.version
