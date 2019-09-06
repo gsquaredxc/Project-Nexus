@@ -1,367 +1,238 @@
 package kaptainwutax.nexus.gpu;
 
-import org.lwjgl.*;
-import org.lwjgl.opencl.*;
-import org.lwjgl.system.*;
+import static org.lwjgl.opencl.CL10.CL_CONTEXT_PLATFORM;
+import static org.lwjgl.opencl.CL10.CL_DEVICE_TYPE_GPU;
+import static org.lwjgl.opencl.CL10.clBuildProgram;
+import static org.lwjgl.opencl.CL10.clCreateCommandQueue;
+import static org.lwjgl.opencl.CL10.clCreateContext;
+import static org.lwjgl.opencl.CL10.clCreateKernel;
+import static org.lwjgl.opencl.CL10.clEnqueueNDRangeKernel;
+import static org.lwjgl.opencl.CL10.clGetDeviceIDs;
+import static org.lwjgl.opencl.CL10.clGetPlatformIDs;
+import static org.lwjgl.opencl.CL10.clSetKernelArg1i;
+import static org.lwjgl.opencl.CL10.clSetKernelArg1p;
+import static kaptainwutax.nexus.gpu.InfoUtil.checkCLError;
+import static org.lwjgl.system.MemoryStack.stackPush;
+import static org.lwjgl.system.MemoryUtil.NULL;
+import static org.lwjgl.system.MemoryUtil.memUTF8;
 
-import java.nio.*;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.concurrent.*;
+import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
 
-import static org.lwjgl.opencl.CL11.*;
-import static org.lwjgl.opencl.KHRICD.*;
-import static org.lwjgl.system.MemoryStack.*;
-import static org.lwjgl.system.MemoryUtil.*;
+import org.lwjgl.BufferUtils;
+import org.lwjgl.PointerBuffer;
+import org.lwjgl.opencl.CL;
+import org.lwjgl.opencl.CL10;
+import org.lwjgl.opencl.CLCapabilities;
+import org.lwjgl.opencl.CLContextCallback;
+import org.lwjgl.opencl.CLProgramCallback;
+import org.lwjgl.system.MemoryStack;
 
 public final class Compute {
     
-    public Compute() {
-        main();
-    }
-    static String getPlatformInfoStringASCII(long cl_platform_id, int param_name) {
-        try (MemoryStack stack = stackPush()) {
-            PointerBuffer pp = stack.mallocPointer(1);
-            checkCLError(clGetPlatformInfo(cl_platform_id, param_name, (ByteBuffer)null, pp));
-            int bytes = (int)pp.get(0);
-            
-            ByteBuffer buffer = stack.malloc(bytes);
-            checkCLError(clGetPlatformInfo(cl_platform_id, param_name, buffer, null));
-            
-            return memASCII(buffer, bytes - 1);
-        }
-    }
+    private static final String sumProgramSource =
+    "kernel void sum(global const float* a, global const float* b, global float* result, int const size) {"
+    + "  const int itemId = get_global_id(0);" + "  if(itemId < size) {"
+    + "    result[itemId] = a[itemId] + b[itemId];" + "  }" + "}";
     
-    static String getPlatformInfoStringUTF8(long cl_platform_id, int param_name) {
-        try (MemoryStack stack = stackPush()) {
-            PointerBuffer pp = stack.mallocPointer(1);
-            checkCLError(clGetPlatformInfo(cl_platform_id, param_name, (ByteBuffer)null, pp));
-            int bytes = (int)pp.get(0);
-            
-            ByteBuffer buffer = stack.malloc(bytes);
-            checkCLError(clGetPlatformInfo(cl_platform_id, param_name, buffer, null));
-            
-            return memUTF8(buffer, bytes - 1);
-        }
-    }
+    private CLContextCallback clContextCB;
+    private long clContext;
+    private IntBuffer errcode_ret;
+    private long clKernel;
+    private long clDevice;
+    private long clQueue;
+    private long sumProgram;
+    private long aMemory;
+    private long bMemory;
+    private long clPlatform;
+    private CLCapabilities clPlatformCapabilities;
+    private long resultMemory;
+    private static final int size = 100;
     
-    static int getDeviceInfoInt(long cl_device_id, int param_name) {
-        try (MemoryStack stack = stackPush()) {
-            IntBuffer pl = stack.mallocInt(1);
-            checkCLError(clGetDeviceInfo(cl_device_id, param_name, pl, null));
-            return pl.get(0);
-        }
-    }
     
-    static long getDeviceInfoLong(long cl_device_id, int param_name) {
-        try (MemoryStack stack = stackPush()) {
-            LongBuffer pl = stack.mallocLong(1);
-            checkCLError(clGetDeviceInfo(cl_device_id, param_name, pl, null));
-            return pl.get(0);
-        }
-    }
-    
-    static long getDeviceInfoPointer(long cl_device_id, int param_name) {
-        try (MemoryStack stack = stackPush()) {
-            PointerBuffer pp = stack.mallocPointer(1);
-            checkCLError(clGetDeviceInfo(cl_device_id, param_name, pp, null));
-            return pp.get(0);
-        }
-    }
-    
-    static String getDeviceInfoStringUTF8(long cl_device_id, int param_name) {
-        try (MemoryStack stack = stackPush()) {
-            PointerBuffer pp = stack.mallocPointer(1);
-            checkCLError(clGetDeviceInfo(cl_device_id, param_name, (ByteBuffer)null, pp));
-            int bytes = (int)pp.get(0);
-            
-            ByteBuffer buffer = stack.malloc(bytes);
-            checkCLError(clGetDeviceInfo(cl_device_id, param_name, buffer, null));
-            
-            return memUTF8(buffer, bytes - 1);
-        }
-    }
-    
-    static int getProgramBuildInfoInt(long cl_program_id, long cl_device_id, int param_name) {
-        try (MemoryStack stack = stackPush()) {
-            IntBuffer pl = stack.mallocInt(1);
-            checkCLError(clGetProgramBuildInfo(cl_program_id, cl_device_id, param_name, pl, null));
-            return pl.get(0);
-        }
-    }
-    
-    static String getProgramBuildInfoStringASCII(long cl_program_id, long cl_device_id, int param_name) {
-        try (MemoryStack stack = stackPush()) {
-            PointerBuffer pp = stack.mallocPointer(1);
-            checkCLError(clGetProgramBuildInfo(cl_program_id, cl_device_id, param_name, (ByteBuffer)null, pp));
-            int bytes = (int)pp.get(0);
-            
-            ByteBuffer buffer = stack.malloc(bytes);
-            checkCLError(clGetProgramBuildInfo(cl_program_id, cl_device_id, param_name, buffer, null));
-            
-            return memASCII(buffer, bytes - 1);
-        }
-    }
-    
-    static void checkCLError(IntBuffer errcode) {
-        checkCLError(errcode.get(errcode.position()));
-    }
-    
-    static void checkCLError(int errcode) {
-        if (errcode != CL_SUCCESS) {
-            throw new RuntimeException(String.format("OpenCL error [%d]", errcode));
-        }
-    }
-    public static void main() {
-        try (MemoryStack stack = stackPush()) {
-            demo(stack);
-        }
-    }
-    
-    private static void demo(MemoryStack stack) {
-        IntBuffer pi = stack.mallocInt(1);
-        checkCLError(clGetPlatformIDs(null, pi));
-        if (pi.get(0) == 0) {
-            throw new RuntimeException("No OpenCL platforms found.");
-        }
+    public void run() {
+        initializeCL();
         
-        PointerBuffer platforms = stack.mallocPointer(pi.get(0));
-        checkCLError(clGetPlatformIDs(platforms, (IntBuffer)null));
         
-        PointerBuffer ctxProps = stack.mallocPointer(3);
-        ctxProps
-        .put(0, CL_CONTEXT_PLATFORM)
-        .put(2, 0);
+        sumProgram = CL10.clCreateProgramWithSource(clContext, sumProgramSource, errcode_ret);
         
-        IntBuffer errcode_ret = stack.callocInt(1);
-        for (int p = 0; p < platforms.capacity(); p++) {
-            long platform = platforms.get(p);
-            ctxProps.put(1, platform);
-            
-            System.out.println("\n-------------------------");
-            System.out.printf("NEW PLATFORM: [0x%X]\n", platform);
-            
-            CLCapabilities platformCaps = CL.createPlatformCapabilities(platform);
-            
-            printPlatformInfo(platform, "CL_PLATFORM_PROFILE", CL_PLATFORM_PROFILE);
-            printPlatformInfo(platform, "CL_PLATFORM_VERSION", CL_PLATFORM_VERSION);
-            printPlatformInfo(platform, "CL_PLATFORM_NAME", CL_PLATFORM_NAME);
-            printPlatformInfo(platform, "CL_PLATFORM_VENDOR", CL_PLATFORM_VENDOR);
-            printPlatformInfo(platform, "CL_PLATFORM_EXTENSIONS", CL_PLATFORM_EXTENSIONS);
-            if (platformCaps.cl_khr_icd) {
-                printPlatformInfo(platform, "CL_PLATFORM_ICD_SUFFIX_KHR", CL_PLATFORM_ICD_SUFFIX_KHR);
+        int errcode = clBuildProgram(sumProgram, clDevice, "", null, NULL);
+        checkCLError(errcode);
+        
+        
+        // init kernel with constants
+        clKernel = clCreateKernel(sumProgram, "sum", errcode_ret);
+        checkCLError(errcode_ret);
+        
+        createMemory();
+        
+        
+        clSetKernelArg1p(clKernel, 0, aMemory);
+        clSetKernelArg1p(clKernel, 1, bMemory);
+        clSetKernelArg1p(clKernel, 2, resultMemory);
+        clSetKernelArg1i(clKernel, 3, size);
+        
+        
+        
+        final int dimensions = 1;
+        PointerBuffer globalWorkSize = BufferUtils.createPointerBuffer(dimensions); // In here we put
+        // the total number
+        // of work items we
+        // want in each
+        // dimension.
+        globalWorkSize.put(0, size); // Size is a variable we defined a while back showing how many
+        // elements are in our arrays.
+        
+        
+        // Run the specified number of work units using our OpenCL program kernel
+        errcode = clEnqueueNDRangeKernel(clQueue, clKernel, dimensions, null, globalWorkSize, null,
+                                         null, null);
+        
+        CL10.clFinish(clQueue);
+        
+        printResults();
+        
+        cleanup();
+    }
+    
+    private void printResults() {
+        // This reads the result memory buffer
+        FloatBuffer resultBuff = BufferUtils.createFloatBuffer(size);
+        // We read the buffer in blocking mode so that when the method returns we know that the result
+        // buffer is full
+        CL10.clEnqueueReadBuffer(clQueue, true,resultMemory, CL10.CL_TRUE, 0, resultBuff, null, null);
+        // Print the values in the result buffer
+        for (int i = 0; i < resultBuff.capacity(); i++) {
+            System.out.println("result at " + i + " = " + resultBuff.get(i));
+        }
+        // This should print out 100 lines of result floats, each being 99.
+    }
+    
+    private void createMemory() {
+        // Create OpenCL memory object containing the first buffer's list of numbers
+        aMemory = CL10.clCreateBuffer(clContext, CL10.CL_MEM_WRITE_ONLY | CL10.CL_MEM_COPY_HOST_PTR,
+                                      getABuffer(), errcode_ret);
+        checkCLError(errcode_ret);
+        
+        // Create OpenCL memory object containing the second buffer's list of numbers
+        bMemory = CL10.clCreateBuffer(clContext, CL10.CL_MEM_WRITE_ONLY | CL10.CL_MEM_COPY_HOST_PTR,
+                                      getBBuffer(), errcode_ret);
+        checkCLError(errcode_ret);
+        
+        // Remember the length argument here is in bytes. 4 bytes per float.
+        resultMemory = CL10.clCreateBuffer(clContext, CL10.CL_MEM_READ_ONLY, size * 4, errcode_ret);
+        checkCLError(errcode_ret);
+    }
+    
+    private FloatBuffer getABuffer() {
+        // Create float array from 0 to size-1.
+        FloatBuffer aBuff = BufferUtils.createFloatBuffer(size);
+        float[] tempData = new float[size];
+        for (int i = 0; i < size; i++) {
+            tempData[i] = i;
+            System.out.println("a[" + i + "]=" + i);
+        }
+        aBuff.put(tempData);
+        aBuff.rewind();
+        return aBuff;
+    }
+    
+    private FloatBuffer getBBuffer() {
+        // Create float array from size-1 to 0. This means that the result should be size-1 for each
+        // element.
+        FloatBuffer bBuff = BufferUtils.createFloatBuffer(size);
+        float[] tempData = new float[size];
+        for (int j = 0, i = size - 1; j < size; j++, i--) {
+            tempData[j] = i;
+            System.out.println("b[" + j + "]=" + i);
+        }
+        bBuff.put(tempData);
+        bBuff.rewind();
+        return bBuff;
+    }
+    
+    
+    private void cleanup() {
+        // Destroy our kernel and program
+        CL10.clReleaseCommandQueue(clQueue);
+        CL10.clReleaseKernel(clKernel);
+        CL10.clReleaseProgram(sumProgram);
+        
+        // Destroy our memory objects
+        CL10.clReleaseMemObject(aMemory);
+        CL10.clReleaseMemObject(bMemory);
+        CL10.clReleaseMemObject(resultMemory);
+        
+        // Not strictly necessary
+        CL.destroy();
+    }
+    
+    public void initializeCL() {
+        errcode_ret = BufferUtils.createIntBuffer(1);
+        
+        // Get the first available platform
+        try (MemoryStack stack = stackPush()) {
+            IntBuffer pi = stack.mallocInt(1);
+            checkCLError(clGetPlatformIDs(null, pi));
+            if (pi.get(0) == 0) {
+                throw new IllegalStateException("No OpenCL platforms found.");
             }
-            System.out.println("");
             
-            checkCLError(clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, null, pi));
+            PointerBuffer platformIDs = stack.mallocPointer(pi.get(0));
+            checkCLError(clGetPlatformIDs(platformIDs, (IntBuffer) null));
+            
+            for (int i = 0; i < platformIDs.capacity() && i == 0; i++) {
+                long platform = platformIDs.get(i);
+                clPlatformCapabilities = CL.createPlatformCapabilities(platform);
+                clPlatform = platform;
+            }
+        }
+        
+        
+        clDevice = getDevice(clPlatform, clPlatformCapabilities, CL_DEVICE_TYPE_GPU);
+        
+        // Create the context
+        PointerBuffer ctxProps = BufferUtils.createPointerBuffer(7);
+        ctxProps.put(CL_CONTEXT_PLATFORM).put(clPlatform).put(NULL).flip();
+        
+        clContext = clCreateContext(ctxProps,
+                                    clDevice, clContextCB = CLContextCallback.create((errinfo, private_info, cb,
+                                                                                      user_data) -> System.out.printf("cl_context_callback\n\tInfo: %s", memUTF8(errinfo))),
+                                    NULL, errcode_ret);
+        
+        // create command queue
+        clQueue = clCreateCommandQueue(clContext, clDevice, NULL, errcode_ret);
+        checkCLError(errcode_ret);
+    }
+    
+    private static long getDevice(long platform, CLCapabilities platformCaps, int deviceType) {
+        try (MemoryStack stack = stackPush()) {
+            IntBuffer pi = stack.mallocInt(1);
+            checkCLError(clGetDeviceIDs(platform, deviceType, null, pi));
             
             PointerBuffer devices = stack.mallocPointer(pi.get(0));
-            checkCLError(clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, devices, (IntBuffer)null));
+            checkCLError(clGetDeviceIDs(platform, deviceType, devices, (IntBuffer) null));
             
-            for (int d = 0; d < devices.capacity(); d++) {
-                long device = devices.get(d);
+            for (int i = 0; i < devices.capacity(); i++) {
+                long device = devices.get(i);
                 
                 CLCapabilities caps = CL.createDeviceCapabilities(device, platformCaps);
-                
-                System.out.printf("\n\t** NEW DEVICE: [0x%X]\n", device);
-                
-                System.out.println("\tCL_DEVICE_TYPE = " + getDeviceInfoLong(device, CL_DEVICE_TYPE));
-                System.out.println("\tCL_DEVICE_VENDOR_ID = " + getDeviceInfoInt(device, CL_DEVICE_VENDOR_ID));
-                System.out.println("\tCL_DEVICE_MAX_COMPUTE_UNITS = " + getDeviceInfoInt(device, CL_DEVICE_MAX_COMPUTE_UNITS));
-                System.out
-                .println("\tCL_DEVICE_MAX_WORK_ITEM_DIMENSIONS = " + getDeviceInfoInt(device, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS));
-                System.out.println("\tCL_DEVICE_MAX_WORK_GROUP_SIZE = " + getDeviceInfoPointer(device, CL_DEVICE_MAX_WORK_GROUP_SIZE));
-                System.out.println("\tCL_DEVICE_MAX_CLOCK_FREQUENCY = " + getDeviceInfoInt(device, CL_DEVICE_MAX_CLOCK_FREQUENCY));
-                System.out.println("\tCL_DEVICE_ADDRESS_BITS = " + getDeviceInfoInt(device, CL_DEVICE_ADDRESS_BITS));
-                System.out.println("\tCL_DEVICE_AVAILABLE = " + (getDeviceInfoInt(device, CL_DEVICE_AVAILABLE) != 0));
-                System.out.println("\tCL_DEVICE_COMPILER_AVAILABLE = " + (getDeviceInfoInt(device, CL_DEVICE_COMPILER_AVAILABLE) != 0));
-                
-                printDeviceInfo(device, "CL_DEVICE_NAME", CL_DEVICE_NAME);
-                printDeviceInfo(device, "CL_DEVICE_VENDOR", CL_DEVICE_VENDOR);
-                printDeviceInfo(device, "CL_DRIVER_VERSION", CL_DRIVER_VERSION);
-                printDeviceInfo(device, "CL_DEVICE_PROFILE", CL_DEVICE_PROFILE);
-                printDeviceInfo(device, "CL_DEVICE_VERSION", CL_DEVICE_VERSION);
-                printDeviceInfo(device, "CL_DEVICE_EXTENSIONS", CL_DEVICE_EXTENSIONS);
-                if (caps.OpenCL11) {
-                    printDeviceInfo(device, "CL_DEVICE_OPENCL_C_VERSION", CL_DEVICE_OPENCL_C_VERSION);
+                if (!(caps.cl_khr_gl_sharing || caps.cl_APPLE_gl_sharing)) {
+                    continue;
                 }
                 
-                CLContextCallback contextCB;
-                long context = clCreateContext(ctxProps, device, contextCB = CLContextCallback.create((errinfo, private_info, cb, user_data) -> {
-                    System.err.println("[LWJGL] cl_context_callback");
-                    System.err.println("\tInfo: " + memUTF8(errinfo));
-                }), NULL, errcode_ret);
-                checkCLError(errcode_ret);
-                
-                long buffer = clCreateBuffer(context, CL_MEM_READ_ONLY, 128, errcode_ret);
-                checkCLError(errcode_ret);
-                
-                CLMemObjectDestructorCallback bufferCB1 = null;
-                CLMemObjectDestructorCallback bufferCB2 = null;
-                
-                long subbuffer = NULL;
-                
-                CLMemObjectDestructorCallback subbufferCB = null;
-                
-                int errcode;
-                
-                CountDownLatch destructorLatch;
-                
-                if (caps.OpenCL11) {
-                    destructorLatch = new CountDownLatch(3);
-                    
-                    errcode = clSetMemObjectDestructorCallback(buffer, bufferCB1 = CLMemObjectDestructorCallback.create((memobj, user_data) -> {
-                        System.out.println("\t\tBuffer destructed (1): " + memobj);
-                        destructorLatch.countDown();
-                    }), NULL);
-                    checkCLError(errcode);
-                    
-                    errcode = clSetMemObjectDestructorCallback(buffer, bufferCB2 = CLMemObjectDestructorCallback.create((memobj, user_data) -> {
-                        System.out.println("\t\tBuffer destructed (2): " + memobj);
-                        destructorLatch.countDown();
-                    }), NULL);
-                    checkCLError(errcode);
-                    
-                    try (CLBufferRegion buffer_region = CLBufferRegion.malloc()) {
-                        buffer_region.origin(0);
-                        buffer_region.size(64);
-                        
-                        subbuffer = nclCreateSubBuffer(buffer,
-                                                       CL_MEM_READ_ONLY,
-                                                       CL_BUFFER_CREATE_TYPE_REGION,
-                                                       buffer_region.address(),
-                                                       memAddress(errcode_ret));
-                        checkCLError(errcode_ret);
-                    }
-                    
-                    errcode = clSetMemObjectDestructorCallback(subbuffer, subbufferCB = CLMemObjectDestructorCallback.create((memobj, user_data) -> {
-                        System.out.println("\t\tSub Buffer destructed: " + memobj);
-                        destructorLatch.countDown();
-                    }), NULL);
-                    checkCLError(errcode);
-                } else {
-                    destructorLatch = null;
-                }
-                
-                long exec_caps = getDeviceInfoLong(device, CL_DEVICE_EXECUTION_CAPABILITIES);
-                if ((exec_caps & CL_EXEC_NATIVE_KERNEL) == CL_EXEC_NATIVE_KERNEL) {
-                    System.out.println("\t\t-TRYING TO EXEC NATIVE KERNEL-");
-                    long queue = clCreateCommandQueue(context, device, NULL, errcode_ret);
-                    
-                    PointerBuffer ev = BufferUtils.createPointerBuffer(1);
-                    
-                    ByteBuffer kernelArgs = BufferUtils.createByteBuffer(4);
-                    kernelArgs.putInt(0, 1337);
-                    
-                    CLNativeKernel kernel;
-                    errcode = clEnqueueNativeKernel(queue, kernel = CLNativeKernel.create(
-                                                                                          args -> System.out.println("\t\tKERNEL EXEC argument: " + memByteBuffer(args, 4).getInt(0) + ", should be 1337")
-                                                                                          ), kernelArgs, null, null, null, ev);
-                    checkCLError(errcode);
-                    
-                    long e = ev.get(0);
-                    
-                    CountDownLatch latch = new CountDownLatch(1);
-                    
-                    CLEventCallback eventCB;
-                    errcode = clSetEventCallback(e, CL_COMPLETE, eventCB = CLEventCallback.create((event, event_command_exec_status, user_data) -> {
-                        System.out.println("\t\tEvent callback status: " + getEventStatusName(event_command_exec_status));
-                        latch.countDown();
-                    }), NULL);
-                    checkCLError(errcode);
-                    
-                    try {
-                        boolean expired = !latch.await(500, TimeUnit.MILLISECONDS);
-                        if (expired) {
-                            System.out.println("\t\tKERNEL EXEC FAILED!");
-                        }
-                    } catch (InterruptedException exc) {
-                        exc.printStackTrace();
-                    }
-                    eventCB.free();
-                    
-                    errcode = clReleaseEvent(e);
-                    checkCLError(errcode);
-                    kernel.free();
-                    
-                    kernelArgs = BufferUtils.createByteBuffer(POINTER_SIZE * 2);
-                    
-                    kernel = CLNativeKernel.create(args -> {
-                    });
-                    
-                    long time   = System.nanoTime();
-                    int  REPEAT = 1000;
-                    for (int i = 0; i < REPEAT; i++) {
-                        clEnqueueNativeKernel(queue, kernel, kernelArgs, null, null, null, null);
-                    }
-                    clFinish(queue);
-                    time = System.nanoTime() - time;
-                    
-                    System.out.printf("\n\t\tEMPTY NATIVE KERNEL AVG EXEC TIME: %.4fus\n", (double)time / (REPEAT * 1000));
-                    
-                    errcode = clReleaseCommandQueue(queue);
-                    checkCLError(errcode);
-                    kernel.free();
-                }
-                
-                System.out.println();
-                
-                if (subbuffer != NULL) {
-                    errcode = clReleaseMemObject(subbuffer);
-                    checkCLError(errcode);
-                }
-                
-                errcode = clReleaseMemObject(buffer);
-                checkCLError(errcode);
-                
-                if (destructorLatch != null) {
-                    // mem object destructor callbacks are called asynchronously on Nvidia
-                    
-                    try {
-                        destructorLatch.await();
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                    
-                    subbufferCB.free();
-                    
-                    bufferCB2.free();
-                    bufferCB1.free();
-                }
-                
-                errcode = clReleaseContext(context);
-                checkCLError(errcode);
-                
-                contextCB.free();
+                return device;
             }
         }
+        
+        return NULL;
     }
     
-    public static void get(FunctionProviderLocal provider, long platform, String name) {
-        System.out.println(name + ": " + provider.getFunctionAddress(platform, name));
-    }
     
-    private static void printPlatformInfo(long platform, String param_name, int param) {
-        System.out.println("\t" + param_name + " = " + getPlatformInfoStringUTF8(platform, param));
-    }
     
-    private static void printDeviceInfo(long device, String param_name, int param) {
-        System.out.println("\t" + param_name + " = " + getDeviceInfoStringUTF8(device, param));
-    }
-    
-    private static String getEventStatusName(int status) {
-        switch (status) {
-            case CL_QUEUED:
-                return "CL_QUEUED";
-            case CL_SUBMITTED:
-                return "CL_SUBMITTED";
-            case CL_RUNNING:
-                return "CL_RUNNING";
-            case CL_COMPLETE:
-                return "CL_COMPLETE";
-            default:
-                throw new IllegalArgumentException(String.format("Unsupported event status: 0x%X", status));
-        }
+    public static void main(String... args) {
+        Compute clApp = new Compute ();
+        clApp.run();
     }
     
 }
