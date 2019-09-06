@@ -1,5 +1,7 @@
 package kaptainwutax.nexus;
 
+import org.lwjgl.system.*;
+
 import kaptainwutax.nexus.path.Pathfinding;
 import kaptainwutax.nexus.utility.Time;
 import kaptainwutax.nexus.gpu.Compute;

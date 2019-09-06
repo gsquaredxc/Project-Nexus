@@ -5,6 +5,8 @@ import org.lwjgl.opencl.*;
 import org.lwjgl.system.*;
 
 import java.nio.*;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.concurrent.*;
 
 import static org.lwjgl.opencl.CL11.*;

@@ -23,3 +23,5 @@ bin/
 # fabric
 
 run/
+/.nb-gradle/
+src/main/.DS_Store
