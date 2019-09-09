@@ -100,7 +100,7 @@ public final class Compute {
         FloatBuffer resultBuff = BufferUtils.createFloatBuffer(size);
         // We read the buffer in blocking mode so that when the method returns we know that the result
         // buffer is full
-        CL10.clEnqueueReadBuffer(clQueue, true,resultMemory, CL10.CL_TRUE, 0, resultBuff, null, null);
+        CL10.clEnqueueReadBuffer(clQueue,resultMemory, true,0,resultBuff, null, null);
         // Print the values in the result buffer
         for (int i = 0; i < resultBuff.capacity(); i++) {
             System.out.println("result at " + i + " = " + resultBuff.get(i));

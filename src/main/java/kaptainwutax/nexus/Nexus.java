@@ -18,7 +18,8 @@ public class Nexus implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		System.out.println("[Project-Nexus] Hello world!");
-        new Compute();
+        Compute clApp = new Compute();
+        clApp.run();
 	}
 
 	public void tick() {
